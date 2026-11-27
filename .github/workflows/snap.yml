@@ -67,15 +67,35 @@ jobs:
           sudo lxd init --auto
           sudo lxd waitready
 
+      - name: Configure disk cleanup.
+        id: disk-cleanup
+        run: |
+          # The cleanup action uses sudo -E, which sudo-rs ignores.
+          sudoers=$(mktemp)
+          printf 'Defaults!%s env_keep += "INPUTS_JSON"\n' "$(command -v bash)" > "$sudoers"
+          sudo visudo -cf "$sudoers"
+          sudo install -m 0440 "$sudoers" /etc/sudoers.d/tdesktop-more-space
+
+          mountpoints=/
+          if mountpoint -q /mnt && [[ $(stat -c %d /mnt) != $(stat -c %d /) ]]; then
+            mountpoints="/ /mnt"
+          fi
+          echo "mountpoints=$mountpoints" >> "$GITHUB_OUTPUT"
+
       - name: Free up some disk space.
         uses: samueldr/more-space-action@97048bd0df83fb05b5257887bdbaffc848887673
         with:
           enable-remove-default-apt-patterns: false
           enable-lvm-span: true
           lvm-span-mountpoint: /var/snap/lxd/common/lxd/storage-pools/default/containers
+          lvm-span-mountpoints: ${{ steps.disk-cleanup.outputs.mountpoints }}
 
       - name: Telegram Desktop snap build.
-        run: sudo -u $USER snap run snapcraft --verbosity=debug
+        run: |
+          lxd_storage=/var/snap/lxd/common/lxd/storage-pools/default/containers
+          mountpoint "$lxd_storage"
+          df -h / "$lxd_storage"
+          sudo -u "$USER" snap run snapcraft --verbosity=debug
 
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
